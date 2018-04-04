@@ -66,10 +66,11 @@ def _draw_box(im, box_list, label_list, color=(0,255,0), cdict=None, form='cente
       c = color
 
     # draw box
-    cv2.rectangle(im, (xmin, ymin), (xmax, ymax), c, 1)
+    cv2.rectangle(im, (xmin, ymin), (xmax, ymax), c, 3)
     # draw label
     font = cv2.FONT_HERSHEY_SIMPLEX
-    cv2.putText(im, label, (xmin, ymax), font, 0.3, c, 1)
+    cv2.putText(im, label, (xmin, ymax), font, 0.5, c, 3)
+  return im
 
 def _viz_prediction_result(model, images, bboxes, labels, batch_det_bbox,
                            batch_det_class, batch_det_prob):

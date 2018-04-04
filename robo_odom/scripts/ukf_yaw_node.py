@@ -64,10 +64,12 @@ UWB_INIT_COUNTER = 0
 YAW_BAIS = 0  #BAIS use for adjustment
 IMU_INIT = True
 UWB_INIT = False
+THRESH = 1
 
 vel_wheel_x = vel_wheel_y = 0
 pos_uwb_x = pos_uwb_y = uwb_yaw = uwb_seq = 0
 imu_yaw = 0
+pre_yaw = yaw_counter = 0
 
 ukf_result = []
 uwb_yaw_list = []
@@ -90,8 +92,8 @@ def h_cv(x):
 def UKFinit():
     global ukf
     ukf_fuse = []
-    p_std_yaw = 0.01
-    v_std_yaw = 0.001
+    p_std_yaw = 0.004
+    v_std_yaw = 0.008
     dt = 0.0125 #80HZ
 
 
@@ -107,13 +109,14 @@ def UKFinit():
 
 def callback_imu(imu):
     global imu_last_time, IMU_INIT, vel_imu_yaw, imu_yaw, fuse_yaw, YAW_BAIS, FUSE_IMUYAW, KALMAN_GAIN
-    global ukf_result, ukf, uwb_yaw, uwb_seq, last_uwb_seq, incremental_yaw
+    global ukf_result, ukf, uwb_yaw, uwb_seq, last_uwb_seq, incremental_yaw, yaw_counter, pre_yaw, THRESH
     
     if IMU_INIT == True:
         print "ukf yaw Init Finished!"
         last_uwb_seq = 0
         incremental_yaw = 0
         imu_last_time = imu.header.stamp.secs + imu.header.stamp.nsecs * 10**-9
+        pre_yaw = uwb_yaw
         IMU_INIT = False
     else:
         #print "ukf yaw Processing"
@@ -121,23 +124,33 @@ def callback_imu(imu):
         dt = imu_time - imu_last_time
 
         vel_imu_yaw = imu.angular_velocity.z
-        qn_imu = [imu.orientation.x, imu.orientation.y, imu.orientation.z, imu.orientation.w]
-        (imu_roll,imu_pitch,imu_yaw) = euler_from_quaternion(qn_imu)
+        #TO much diveration in imu yaw, ignore for now.
+        #qn_imu = [imu.orientation.x, imu.orientation.y, imu.orientation.z, imu.orientation.w]
+        #(imu_roll,imu_pitch,imu_yaw) = euler_from_quaternion(qn_imu)
         #imu_yaw = imu_yaw + YAW_BAIS
+
+        if uwb_yaw > -np.pi and uwb_yaw < -np.pi + THRESH and pre_yaw < np.pi and pre_yaw > np.pi - THRESH:
+            yaw_counter = yaw_counter + 1
+        if uwb_yaw < np.pi and uwb_yaw > np.pi - THRESH and pre_yaw > - np.pi and pre_yaw < - np.pi + THRESH:
+            yaw_counter = yaw_counter - 1
+        pre_yaw = uwb_yaw
+        yaw_out = yaw_counter * 2 * np.pi + uwb_yaw
+        
+        
         # uwb not change, use imu to compensate
         if uwb_seq - last_uwb_seq == 0:
             incremental_yaw = incremental_yaw + vel_imu_yaw * dt
-            fuse_yaw = uwb_yaw + incremental_yaw
+            fuse_yaw = yaw_out + incremental_yaw
         else:
             dt = imu_time - uwb_time
             incremental_yaw = 0
             incremental_yaw = incremental_yaw + vel_imu_yaw * dt
-            fuse_yaw = uwb_yaw + incremental_yaw
-
-        
+            fuse_yaw = yaw_out + incremental_yaw
 
         if FUSE_IMUYAW == True:
             fuse_yaw = KALMAN_GAIN * fuse_yaw + (1-KALMAN_GAIN) * imu_yaw
+            
+
         imu_last_time = imu_time
         last_uwb_seq = uwb_seq
 
@@ -145,8 +158,10 @@ def callback_imu(imu):
         ukf.predict()
         ukf.update(ukf_input)
         ukf_out_yaw = ukf.x[0]
+        
+        ukf_out_yaw = ukf_out_yaw - yaw_counter * 2 * np.pi
         #print ukf.x[0]
-        #print 'imu_yaw:',imu_yaw, 'uwb_yaw',uwb_yaw,'fuse_yaw', fuse_yaw,'bais:', uwb_yaw - imu_yaw, 'kalman',ukf_out_yaw
+        #print 'imu_yaw:',imu_yaw, 'uwb_yaw',uwb_yaw,'fuse_yaw', fuse_yaw,'bais:', uwb_yaw - imu_yaw, 'kalman',ukf_out_yaw, 'accz', vel_imu_yaw
 
         ukf_yaw = Odometry()
         ukf_yaw.header.frame_id = "ukf_yaw"

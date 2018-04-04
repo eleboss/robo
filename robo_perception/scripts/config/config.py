@@ -23,7 +23,7 @@ def base_model_config(dataset='PASCAL_VOC'):
                        'horse', 'motorbike', 'person', 'pottedplant', 'sheep',
                        'sofa', 'train', 'tvmonitor')
   elif cfg.DATASET == 'KITTI':
-    cfg.CLASS_NAMES = ('red', 'blue','wheel')
+    cfg.CLASS_NAMES = ('red', 'wheel','blue')
 
   # number of categories to classify
   cfg.CLASSES = len(cfg.CLASS_NAMES)    
@@ -41,10 +41,10 @@ def base_model_config(dataset='PASCAL_VOC'):
   cfg.KEEP_PROB = 0.5
 
   # image width
-  cfg.IMAGE_WIDTH = 640
+  cfg.IMAGE_WIDTH = 424
 
   # image height
-  cfg.IMAGE_HEIGHT = 480
+  cfg.IMAGE_HEIGHT = 240
 
   # anchor box, array of [cx, cy, w, h]. To be defined later
   cfg.ANCHOR_BOX = []

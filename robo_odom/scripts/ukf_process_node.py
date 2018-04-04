@@ -92,7 +92,7 @@ def h_cv(x):
 def UKFinit():
     global ukf
     ukf_fuse = []
-    p_std_x, p_std_y = 0.1, 0.1
+    p_std_x, p_std_y = 0.2, 0.2
     v_std_x, v_std_y = 0.01, 0.01
     a_std_x, a_std_y = 0.01, 0.01
     dt = 0.0125 #80HZ
