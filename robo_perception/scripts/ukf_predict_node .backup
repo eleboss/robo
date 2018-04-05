@@ -1,0 +1,278 @@
+#!/usr/bin/python2.7
+# coding=<encoding name> 例如，可添加# coding=utf-8
+
+###############UKF参数选取和系统方程测定方法##############
+#参数选取原则  
+#首先按照动力学方程建立F方程 速度等于加速度乘时间。 v（i+1） = v（i） + a*dt
+#F要和H相乘，H=【vx,vx',vy,vy'】，所以写为下面的形式，两个yaw分别是imu和uwb的观测
+#用H来选择有几个输入参数，这里我有三个参数，分别是yaw观测1，yaw观测2，dyaw。  
+#dim_x = 4， 表示输入方程有四个输入  
+#dim_z = 4 表示观测方程z有4个观测。两个轴，xy，速度和加速度
+#v_std_x, a_std_x, 表示速度和加速度的测量误差，这里根据测量结果填写
+#Q噪声项，var这里我发现用0.2的结果比较好，目前还不知道为什么  
+#P里头分别填上前面两轴速度加速度能达到的最大值。  【vx,vx',vy,vy'】
+#ukf.x = np.array([0., 0., 0., 0.])表示起始位置和起始速度都是0
+# MerweScaledSigmaPoints(4, alpha=.1, beta=2., kappa=-1.0) 4表示输入参数有三个yaw，yaw，dyaw  
+#######################################################
+#数据融合方法说明：
+#这里使用的数据融合方法是这样的：
+#使用KALMAN_GAIN调整对应于轮式里程计和IMU的取值，一边取一点然后相加即可。
+
+
+#注意事项：开车前保持车辆静止
+#################比赛场地坐标系定义###########################
+#                  X+
+#                  1
+#                  0
+#                  0
+#                  0
+#                  0
+#                  0
+#                  0
+# Y+  <-000000000000
+
+# Check list
+# KALMAN_GAIN是不是对应上去了
+
+import rospy 
+import roslib
+import pickle
+import math
+import tf
+import tf2_ros
+from numpy.random import randn
+import numpy as np
+from tf.transformations import quaternion_from_euler, euler_from_quaternion
+
+from filterpy.kalman import UnscentedKalmanFilter as UKF
+from filterpy.kalman import KalmanFilter
+from filterpy.common import Q_discrete_white_noise
+from filterpy.kalman import unscented_transform, MerweScaledSigmaPoints
+
+from nav_msgs.msg import Odometry
+from sensor_msgs.msg import Imu
+from robo_perception.msg import ObjectList
+from robo_perception.msg import Object
+from geometry_msgs.msg import TransformStamped
+from geometry_msgs.msg import PoseStamped
+
+PREDICT_INIT = True
+
+ukf_0_result = []
+ukf_1_result = []
+
+# S（i+1） = S（i） + V*dt
+def f_cv(x, dt):
+    """ state transition function for a 
+    constant velocity aircraft"""
+    
+    F = np.array([[1, dt, 0,  0],
+                  [0,  1, 0,  0],
+                  [0,  0, 1, dt],
+                  [0,  0, 0,  1]],dtype=float)
+    return np.dot(F, x)
+
+def h_cv(x):
+    return np.array([x[0], x[1], x[2], x[3]])
+
+
+def UKF0init():
+    global ukf_0
+
+    p_std_x, p_std_y = 0.1, 0.1
+    v_std_x, v_std_y = 0.1, 0.1
+    dt = 0.0125 #80HZ
+
+
+    sigmas = MerweScaledSigmaPoints(4, alpha=.1, beta=2., kappa=-1.0)
+    ukf = UKF(dim_x=4, dim_z=4, fx=f_cv, hx=h_cv, dt=dt, points=sigmas)
+    ukf_0.x = np.array([0., 0., 0., 0.])
+    ukf_0.R = np.diag([p_std_x, v_std_x, p_std_y, v_std_y]) 
+    ukf_0.Q[0:2, 0:2] = Q_discrete_white_noise(2, dt=dt, var=0.2)
+    ukf_0.Q[2:4, 2:4] = Q_discrete_white_noise(2, dt=dt, var=0.2)
+    ukf_0.P = np.diag([8, 1.5 ,5, 1.5])
+
+
+def UKF1init():
+    global ukf_1
+
+    p_std_x, p_std_y = 0.1, 0.1
+    v_std_x, v_std_y = 0.1, 0.1
+    dt = 0.0125
+
+    ukf = UKF(dim_x=4, dim_z=4, fx=f_cv, hx=h_cv, dt=dt, points=sigmas)
+    ukf_1.x = np.array([0., 0., 0., 0.])
+    ukf_1.R = np.diag([p_std_x, v_std_x, p_std_y, v_std_y]) 
+    ukf_1.Q[0:2, 0:2] = Q_discrete_white_noise(2, dt=dt, var=0.2)
+    ukf_1.Q[2:4, 2:4] = Q_discrete_white_noise(2, dt=dt, var=0.2)
+    ukf_1.P = np.diag([8, 1.5 ,5, 1.5])
+
+
+def callback_enemy(enemy):
+    global last_enemy_num, PREDICT_INIT
+    global ukf_0_result, ukf_1_result, ukf_0, ukf_1, max_move_distance
+    if PREDICT_INIT == True:
+        print "ukf vel Init Finished!"
+        enemy_last_time = enemy.header.stamp.secs + enemy.header.stamp.nsecs * 10**-9
+        last_enemy_num = 0
+        max_move_distance = 0.5
+        lost_time_0 = []
+        lost_time_1 = []
+        PREDICT_INIT = False
+    else:
+        enemy_time = imu.header.stamp.secs + imu.header.stamp.nsecs * 10**-9
+        for i in range(enemy.num):
+            object_name =  enemy.object[i].team.data
+            if object_name == 'red0' or object_name == 'red1':
+                enemy_num = enemy_num + 1
+                try:
+                    enemy_object_trans.append(tfBuffer.lookup_transform(object_name, 'base_link', rospy.Time(0), rospy.Duration(0.1)))
+                except (tf2_ros.LookupException, tf2_ros.ConnectivityException, tf2_ros.ExtrapolationException):
+                    print('ENEMY OBJ TRANS FAIL! check your code')
+            elif object_name == 'blue0':
+                team_num = team_num + 1
+                try:
+                    team_object_trans.append(tfBuffer.lookup_transform(object_name, 'base_link', rospy.Time(0), rospy.Duration(0.1)))
+                except (tf2_ros.LookupException, tf2_ros.ConnectivityException, tf2_ros.ExtrapolationException):
+                    print('TEAM OBJ TRANS FAIL! check your code')
+        #object judgement
+
+        if enemy_num == 1
+            enemy_0_x = enemy_object_trans[0].transform.translation.x
+            enemy_0_y = enemy_object_trans[0].transform.translation.y
+            enemy_1_x = 0
+            enemy_1_y = 0
+        elif enemy_num == 2
+            enemy_0_x = enemy_object_trans[0].transform.translation.x
+            enemy_0_y = enemy_object_trans[0].transform.translation.y
+            enemy_1_x = enemy_object_trans[1].transform.translation.x
+            enemy_1_y = enemy_object_trans[1].transform.translation.y
+
+        dt = enemy_time - enemy_last_time
+        dt_0 = dt
+        dt_1 = dt       
+        if enemy_num == 0 and last_enemy_num == 0:
+            print 'no obj detect'
+            if obj_0_lost == True:
+                lost_counter_0 = lost_counter_0 + 1 
+                lost_time_0.append[dt_0]
+            if obj_1_lost == True:
+                lost_counter_1 = lost_counter_1 + 1 
+                lost_time_1.append[dt_1]
+        elif enemy_num == 1 and last_enemy_num == 0:
+            valid_distance = np.sqrt((enemy_0_x - last_enemy_0_x) ** 2 + (enemy_0_y - last_enemy_0_y) ** 2)
+            if valid_distance < max_move_distance:
+                dt_0 = np.sum(lost_time_0)
+                enemy_0_vel_x = (last_enemy_0_x - enemy_0_x) / dt_0
+                enemy_0_vel_y = (last_enemy_0_y - enemy_0_y) / dt_0
+                ukf0_input = [enemy_0_x, enemy_0_vel_x, enemy_0_y, enemy_0_vel_y]
+                ukf0.predict()
+                ukf0.update(ukf0_input)
+            else:
+                UKF0init()
+                ukf_0.x = np.array([enemy_0_x, 0., enemy_0_y, 0.])
+
+            lost_counter_0 = 0
+            lost_time_0 = []
+
+        elif enemy_num == 2 and last_enemy_num == 0:
+            UKF0init()
+            ukf_0.x = np.array([0., 0., 0., 0.])
+            UKF1init()
+            ukf_1.x = np.array([0., 0., 0., 0.])
+        elif enemy_num == 0 and last_enemy_num == 1:
+            obj_0_lost = True
+            lost_counter_0 = lost_counter_0 + 1 
+        elif enemy_num == 1 and last_enemy_num == 1:
+            valid_distance = np.sqrt((enemy_0_x - last_enemy_0_x) ** 2 + (enemy_0_y - last_enemy_0_y) ** 2)
+            if valid_distance < max_move_distance:
+                enemy_0_vel_x = (last_enemy_0_x - enemy_0_x) / dt_0
+                enemy_0_vel_y = (last_enemy_0_y - enemy_0_y) / dt_0
+                ukf0_input = [enemy_0_x, enemy_0_vel_x, enemy_0_y, enemy_0_vel_y]
+                ukf0.predict()
+                ukf0.update(ukf0_input)
+            else:
+                UKF0init()
+                ukf_0.x = np.array([enemy_0_x, 0., enemy_0_y, 0.])
+        elif enemy_num == 2 and last_enemy_num == 1:
+
+        elif enemy_num == 0 and last_enemy_num == 2:
+            obj_0_lost = True
+            obj_1_lost = True
+            lost_counter_0 = lost_counter_0 + 1 
+            lost_time_0.append[dt_0]
+            lost_counter_1 = lost_counter_1 + 1 
+            lost_time_1.append[dt_1]
+        elif enemy_num == 1 and last_enemy_num == 2:
+            valid_distance_0 = np.sqrt((enemy_0_x - last_enemy_0_x) ** 2 + (enemy_0_y - last_enemy_0_y) ** 2)
+            valid_distance_1 = np.sqrt((enemy_0_x - last_enemy_1_x) ** 2 + (enemy_0_y - last_enemy_1_y) ** 2)
+            if valid_distance_0 > max_move_distance:
+                obj_0_lost = True
+                lost_counter_0 = lost_counter_0 + 1 
+                lost_time_0.append[dt_0]
+                #object 1 lost but  object 0 still trackable  
+                enemy_1_vel_x = (last_enemy_1_x - enemy_1_x) / dt_0
+                enemy_1_vel_y = (last_enemy_1_y - enemy_1_y) / dt_0
+                ukf1_input = [enemy_1_x, enemy_1_vel_x, enemy_1_y, enemy_1_vel_y]
+                ukf1.predict()
+                ukf1.update(ukf1_input)  
+            elif valid_distance_1 > max_move_distance:
+                obj_1_lost = True
+                lost_counter_1 = lost_counter_1 + 1 
+                lost_time_1.append[dt_1]
+                #object 1 lost but  object 0 still trackable  
+                enemy_0_vel_x = (last_enemy_0_x - enemy_0_x) / dt_0
+                enemy_0_vel_y = (last_enemy_0_y - enemy_0_y) / dt_0
+                ukf0_input = [enemy_0_x, enemy_0_vel_x, enemy_0_y, enemy_0_vel_y]
+                ukf0.predict()
+                ukf0.update(ukf0_input)           
+        elif enemy_num == 2 and last_enemy_num == 2:
+
+        enemy_object_trans[0].transform.translation.y
+        enemy_object_trans[0].transform.translation.x
+
+
+
+        last_enemy_num = enemy_num
+        last_enemy_0_x = enemy_0_x
+        last_enemy_0_y = enemy_0_y
+        last_enemy_1_x = enemy_1_x
+        last_enemy_1_y = enemy_1_y
+
+
+        vel_imu_x = vel_imu_x + acc_imu_x * dt
+        vel_imu_y = vel_imu_y + acc_imu_y * dt
+        print 'imu acc', acc_imu_x
+
+        imu_last_time = imu_time
+
+        vel_fuse_x = KALMAN_GAIN * vel_wheel_x + (1-KALMAN_GAIN) * vel_imu_x
+        vel_fuse_y = KALMAN_GAIN * vel_wheel_y + (1-KALMAN_GAIN) * vel_imu_y
+
+        ukf_input = [vel_fuse_x, acc_imu_x, vel_fuse_y, acc_imu_y]
+        ukf.predict()
+        ukf.update(ukf_input)
+        #print ukf.x
+        ukf_out_vel_x = ukf.x[0]
+        ukf_out_vel_y = ukf.x[2]
+
+        ukf_vel = Odometry()
+        ukf_vel.header.frame_id = "ukf_vel"
+        ukf_vel.header.stamp.secs = imu.header.stamp.secs
+        ukf_vel.header.stamp.nsecs = imu.header.stamp.nsecs
+        ukf_vel.twist.twist.linear.x = ukf_out_vel_x
+        ukf_vel.twist.twist.linear.y = ukf_out_vel_y
+        pub_ukf_vel.publish(ukf_vel)
+
+
+
+
+
+
+
+rospy.init_node('ukf_predict_node')
+UKF0init()
+UKF0init()
+subenemy = rospy.Subscriber('rgb_detection/enemy_position' ObjectList, callback_enemy)
+pub_ukf_vel = rospy.Publisher('/ukf/enemy', ObjectList, queue_size=1)
+rospy.spin()

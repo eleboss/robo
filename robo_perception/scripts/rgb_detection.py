@@ -208,32 +208,30 @@ def TsDet_callback(rgb,pointcloud):
         enemy_position = ObjectList()
         enemy_position.header.stamp = rospy.Time.now()
         enemy_position.header.frame_id = 'enemy'
-        print(len(robo_position))
+        enemy_position.num = robo_position.shape[0]
         robo_position = np.array(robo_position)
         if robo_position.shape[0] == 1:
             robo_position = np.array(robo_position)
-        print(robo_position)
-
 
         red_idx = 0
         blue_idx = 0
         for object_idx in range(robo_position.shape[0]):
             enemy = Object()
-            print(np.array(robo_idx)[0][0])
-            enemy.team.data = mc.CLASS_NAMES[np.array(robo_idx)[0][0]]
             enemy.pose.position.x = robo_position[object_idx, 2]
             enemy.pose.position.y = -robo_position[object_idx, 0]
             enemy.pose.position.z = robo_position[object_idx, 1]
             enemy_position.object.append(enemy)
 
-            
+            #sending tf information
             t.header.stamp = rospy.Time.now()
             t.header.frame_id = 'base_link'
             if mc.CLASS_NAMES[np.array(robo_idx)[0][0]] == 'red':
                 t.child_frame_id = mc.CLASS_NAMES[np.array(robo_idx)[0][0]] + str(red_idx)
+                enemy.team.data = mc.CLASS_NAMES[np.array(robo_idx)[0][0]] + str(red_idx)
                 red_idx = red_idx + 1
             if mc.CLASS_NAMES[np.array(robo_idx)[0][0]] == 'blue':
-                t.child_frame_id = mc.CLASS_NAMES[np.array(robo_idx)[0][0]] + str(blue_idx) 
+                t.child_frame_id = mc.CLASS_NAMES[np.array(robo_idx)[0][0]] + str(blue_idx)
+                enemy.team.data = mc.CLASS_NAMES[np.array(robo_idx)[0][0]] + str(blue_idx)
                 blue_idx = blue_idx + 1
                                 
             t.transform.translation.x = robo_position[object_idx, 2]
