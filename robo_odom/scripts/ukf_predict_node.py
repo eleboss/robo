@@ -156,11 +156,11 @@ def callback_yaw(yaw):
     (ukf_roll,ukf_pitch,ukf_yaw) = euler_from_quaternion(qn_ukf)
 
 
-rospy.init_node('ukf_vel_node')
+rospy.init_node('ukf_predict_node')
 UKFinit()
 subimu = rospy.Subscriber('/map/imu/data', Imu, callback_imu)
 subwheel = rospy.Subscriber('/robo/wheel/data', Vector3Stamped, callback_wheel)
-subyaw = rospy.Subscriber('/ukf/yaw', Odometry, callback_yaw)
+subenemy = rospy.Subscriber('rgb_detection/enemy_position' Odometry, callback_enemy)
 
 pub_ukf_vel = rospy.Publisher('/ukf/vel', Odometry, queue_size=1)
 rospy.spin()

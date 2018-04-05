@@ -24,14 +24,13 @@ from sensor_msgs.msg import Image
 from sensor_msgs.msg import PointCloud2
 import sensor_msgs.point_cloud2 as pc2
 from nav_msgs.msg import Odometry
+from robo_perception.msg import ObjectList
+from robo_perception.msg import Object
 
 import tensorflow as tf
 from config import *
 from train import _draw_box
 from nets import *
-
-
-
 
 count = 0
 flag = True
@@ -40,7 +39,7 @@ def DetectInit():
     global sess, model, mc
 
     detect_net = 'squeezeDet'
-    checkpoint = '/home/ubuntu/catkin_ws/src/robo_perception/scripts/weights/model.ckpt-99999'
+    checkpoint = '/home/ubuntu/Documents/jwwangchn/catkin_ws/src/robo_perception/scripts/weights/model.ckpt-99999'
 
 
     assert detect_net == 'squeezeDet' or detect_net == 'squeezeDet+', \
@@ -129,19 +128,21 @@ def TsDet_callback(rgb,pointcloud):
         final_boxes = final_boxes[np.newaxis, :]
         final_probs = np.array([final_probs])
         final_class = np.array([final_class])
-    #print(final_boxes, final_probs, final_class)
+    # print(final_boxes, final_probs, final_class)
     avgX = 0
     avgY = 0
     avgZ = 0
-    
+    robo_position = []
     if len(final_boxes)>0:
-        # pointcloud
-        #print('find enemy')
+        # single enemy
         area = [bbox[2] * bbox[3] for bbox in final_boxes]
         max_area_idx = np.argmax(area)
-        #print(final_boxes, max_area_idx)
         robo_bbox = final_boxes[max_area_idx, :]
         
+        # mutil enemy
+        robo_idx = np.where(final_class == 0)
+        print(robo_idx)
+
         cx = robo_bbox[0]
         cy = robo_bbox[1]
         pointcloud_w = 5
@@ -178,6 +179,7 @@ def TsDet_callback(rgb,pointcloud):
         avgX = np.mean(positionX)
         avgY = np.mean(positionY)
         avgZ = np.mean(positionZ)
+        robo_position.append([avgX, avgY, avgZ])
         print('position: ', avgX, avgY, avgZ)
         
         
@@ -197,11 +199,58 @@ def TsDet_callback(rgb,pointcloud):
         
         br.sendTransform(t) 
 
-        enemy_position = Odometry()
-        enemy_position.pose.pose.position.x = avgZ
-        enemy_position.pose.pose.position.y = -avgX
-        enemy_position.pose.pose.position.z = avgY
+        # enemy_position = Odometry()
+        # enemy_position.pose.pose.position.x = avgZ
+        # enemy_position.pose.pose.position.y = -avgX
+        # enemy_position.pose.pose.position.z = avgY
+        # pub.publish(enemy_position)
+
+        enemy_position = ObjectList()
+        enemy_position.header.stamp = rospy.Time.now()
+        enemy_position.header.frame_id = 'enemy'
+        print(len(robo_position))
+        robo_position = np.array(robo_position)
+        if robo_position.shape[0] == 1:
+            robo_position = np.array(robo_position)
+        print(robo_position)
+
+
+        red_idx = 0
+        blue_idx = 0
+        for object_idx in range(robo_position.shape[0]):
+            enemy = Object()
+            print(np.array(robo_idx)[0][0])
+            enemy.team.data = mc.CLASS_NAMES[np.array(robo_idx)[0][0]]
+            enemy.pose.position.x = robo_position[object_idx, 2]
+            enemy.pose.position.y = -robo_position[object_idx, 0]
+            enemy.pose.position.z = robo_position[object_idx, 1]
+            enemy_position.object.append(enemy)
+
+            
+            t.header.stamp = rospy.Time.now()
+            t.header.frame_id = 'base_link'
+            if mc.CLASS_NAMES[np.array(robo_idx)[0][0]] == 'red':
+                t.child_frame_id = mc.CLASS_NAMES[np.array(robo_idx)[0][0]] + str(red_idx)
+                red_idx = red_idx + 1
+            if mc.CLASS_NAMES[np.array(robo_idx)[0][0]] == 'blue':
+                t.child_frame_id = mc.CLASS_NAMES[np.array(robo_idx)[0][0]] + str(blue_idx) 
+                blue_idx = blue_idx + 1
+                                
+            t.transform.translation.x = robo_position[object_idx, 2]
+            t.transform.translation.y = -robo_position[object_idx, 0]
+            t.transform.translation.z = robo_position[object_idx, 1]
+            t.transform.rotation.x = 0 
+            t.transform.rotation.y = 0
+            t.transform.rotation.z = 0
+            t.transform.rotation.w = 1
+            br.sendTransform(t) 
         pub.publish(enemy_position)
+        
+            # enemy_position = ObjectList()
+            # enemy_position.Object[object_idx].pose.position.x = robo_position[]avgZ
+            # enemy_position.Object[object_idx].pose.position.y = -avgX
+            # enemy_position.Object[object_idx].pose.position.z = avgY
+
     else:
         print('No enemy!!!')	
 
@@ -235,7 +284,7 @@ def TsDet_callback(rgb,pointcloud):
         # cv2.imshow('demo', im)
         # file_name = os.path.split(f)[1]
         file_name = '0001.jpg'
-        out_file_name = os.path.join('/home/ubuntu/catkin_ws/src/robo_perception/scripts/visual', 'out_'+file_name)
+        out_file_name = os.path.join('/home/ubuntu/Documents/jwwangchn/catkin_ws/src/robo_perception/scripts/visual', 'out_'+file_name)
         cv2.imwrite(out_file_name, im)
         print ('Image detection output saved to {}'.format(out_file_name))
 
@@ -247,7 +296,7 @@ rgb_sub = message_filters.Subscriber('camera/color/image_raw', Image)
 #rgb_sub = message_filters.Subscriber('camera/infra1/image_rect_raw', Image)
 pc_sub =  message_filters.Subscriber('/camera/depth_registered/points', PointCloud2)
 #depth_sub = message_filters.Subscriber('camera/depth/image_rect_raw', Image)
-pub = rospy.Publisher('rgb_detection/enemy_position', Odometry, queue_size=1)
+pub = rospy.Publisher('rgb_detection/enemy_position', ObjectList, queue_size=1)
 
 #TODO 在后面的试验中调调整slop
 TsDet = message_filters.ApproximateTimeSynchronizer([rgb_sub,pc_sub],queue_size=5, slop=0.1, allow_headerless=False)
