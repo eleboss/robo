@@ -90,6 +90,8 @@ class ImuFilterRos
     bool reverse_tf_;
     std::string fixed_frame_;
     std::string imu_frame_;
+    std::string input_prefix_;
+    std::string output_prefix_;
     double constant_dt_;
     bool publish_debug_topics_;
     geometry_msgs::Vector3 mag_bias_;

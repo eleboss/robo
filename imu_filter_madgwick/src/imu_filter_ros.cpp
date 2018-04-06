@@ -50,6 +50,10 @@ ImuFilterRos::ImuFilterRos(ros::NodeHandle nh, ros::NodeHandle nh_private):
    imu_frame_ = "imu_frame";
   if (!nh_private_.getParam ("constant_dt", constant_dt_))
     constant_dt_ = 0.0;
+  if (!nh_private_.getParam ("input_prefix", input_prefix_))
+    input_prefix = "mavros/imu";
+  if (!nh_private_.getParam ("output_prefix", output_prefix_))
+    output_prefix = "px4/imu";
   if (!nh_private_.getParam ("publish_debug_topics", publish_debug_topics_))
     publish_debug_topics_= false;
 
