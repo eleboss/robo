@@ -62,10 +62,10 @@ def base_model_config(dataset='PASCAL_VOC'):
   cfg.PROB_THRESH = 0.005
 
   # Only plot boxes with probability higher than this threshold
-  cfg.PLOT_PROB_THRESH = 0.5
+  cfg.PLOT_PROB_THRESH = 0.7
 
   # Bounding boxes with IOU larger than this are going to be removed
-  cfg.NMS_THRESH = 0.2
+  cfg.NMS_THRESH = 0.7
 
   # Pixel mean values (BGR order) as a (1, 1, 3) array. Below is the BGR mean
   # of VGG16

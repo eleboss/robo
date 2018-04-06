@@ -39,7 +39,7 @@
     <param name="use_magnetic_field_msg" value="true"/>
   </node>
 
-  <node pkg="imu_filter_madgwick" type="imu_filter_node" name="imu_filter_gimbal_node" output="screen">
+  <!--node pkg="imu_filter_madgwick" type="imu_filter_node" name="imu_filter_gimbal_node" output="screen">
     <param name="input_prefix" value="gimbal/imu"/>
     <param name="output_prefix" value="gimbal/imu"/>
     <param name="use_mag" value="false"/>
@@ -47,7 +47,7 @@
     <param name="fixed_frame" value="robo_link"/>
 		<param name="imu_frame" value="px4_link"/>
     <param name="use_magnetic_field_msg" value="true"/>
-  </node>
+  </node-->
 
   <!-- Here we use a not right tf tree,
 	robo_link->px4_link->uwb_link     
